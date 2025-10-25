@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 const FinancialChart = () => {
   const [loading, setLoading] = useState(true);
@@ -8,8 +8,185 @@ const FinancialChart = () => {
     empresa: { transacciones: [] },
     usuarios: { transacciones: [] }
   });
+  
+  // Face ID states con MediaPipe
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isFaceIdAvailable, setIsFaceIdAvailable] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [detectionStatus, setDetectionStatus] = useState('Preparando cámara...');
+  const [faceDetected, setFaceDetected] = useState(false);
+  
+  // Refs para MediaPipe
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const faceDetectionRef = useRef(null);
+  const cameraRef = useRef(null);
 
-  // Use useCallback to prevent unnecessary re-renders
+  // Configuración de MediaPipe Face Detection
+  useEffect(() => {
+    const initializeMediaPipe = async () => {
+      try {
+        // Cargar MediaPipe dinámicamente
+        const { FaceDetection } = await import('@mediapipe/face_detection');
+        const { Camera } = await import('@mediapipe/camera_utils');
+        
+        // Inicializar Face Detection
+        faceDetectionRef.current = new FaceDetection({
+          locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`;
+          }
+        });
+
+        faceDetectionRef.current.setOptions({
+          model: 'short',
+          minDetectionConfidence: 0.5,
+          minSuppressionThreshold: 0.3
+        });
+
+        faceDetectionRef.current.onResults(onFaceDetectionResults);
+
+        setIsFaceIdAvailable(true);
+        setDetectionStatus('Cámara lista - Acércate a la cámara');
+        
+      } catch (error) {
+        console.error('Error loading MediaPipe:', error);
+        setAuthError('No se pudo cargar el sistema de reconocimiento facial');
+        setIsFaceIdAvailable(false);
+      }
+    };
+
+    initializeMediaPipe();
+  }, []);
+
+  // Resultados de la detección facial
+  const onFaceDetectionResults = useCallback((results) => {
+    if (!canvasRef.current || !videoRef.current) return;
+
+    const canvasElement = canvasRef.current;
+    const canvasCtx = canvasElement.getContext('2d');
+    
+    // Limpiar canvas
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    
+    // Dibujar video
+    canvasCtx.drawImage(
+      results.image, 0, 0, canvasElement.width, canvasElement.height
+    );
+
+    // Verificar si se detectó un rostro
+    if (results.detections.length > 0) {
+      const detection = results.detections[0];
+      
+      // Dibujar bounding box
+      canvasCtx.strokeStyle = '#00FF00';
+      canvasCtx.lineWidth = 2;
+      const boundingBox = detection.boundingBox;
+      canvasCtx.strokeRect(
+        boundingBox.xCenter * canvasElement.width - boundingBox.width * canvasElement.width / 2,
+        boundingBox.yCenter * canvasElement.height - boundingBox.height * canvasElement.height / 2,
+        boundingBox.width * canvasElement.width,
+        boundingBox.height * canvasElement.height
+      );
+
+      if (!faceDetected) {
+        setFaceDetected(true);
+        setDetectionStatus('✅ Rostro detectado - Autenticando...');
+        
+        // Simular proceso de autenticación después de detectar rostro
+        setTimeout(() => {
+          authenticateUser();
+        }, 1500);
+      }
+    } else {
+      if (faceDetected) {
+        setFaceDetected(false);
+        setDetectionStatus('Rostro perdido - Acércate a la cámara');
+      }
+    }
+    
+    canvasCtx.restore();
+  }, [faceDetected]);
+
+  // Autenticar usuario después de detección
+  const authenticateUser = useCallback(async () => {
+    setIsAuthenticating(true);
+    
+    try {
+      // Simular verificación biométrica más avanzada
+      await new Promise((resolve, reject) => {
+        setTimeout(() => {
+          // 85% de éxito para simulación más realista
+          if (Math.random() > 0.15) {
+            resolve(true);
+          } else {
+            reject(new Error('Verificación biométrica falló. Intenta nuevamente.'));
+          }
+        }, 2000);
+      });
+
+      // Detener cámara después de autenticación exitosa
+      if (cameraRef.current) {
+        cameraRef.current.stop();
+      }
+      
+      setIsAuthenticated(true);
+      setAuthError('');
+      setDetectionStatus('✅ Autenticación exitosa');
+    } catch (error) {
+      setAuthError(error.message);
+      setFaceDetected(false);
+      setDetectionStatus('Autenticación fallida - Intenta nuevamente');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }, []);
+
+  // Iniciar cámara para Face ID
+  const startFaceIdAuthentication = useCallback(async () => {
+    if (!faceDetectionRef.current || !videoRef.current) return;
+
+    try {
+      setAuthError('');
+      setFaceDetected(false);
+      setDetectionStatus('Iniciando cámara...');
+      
+      const { Camera } = await import('@mediapipe/camera_utils');
+      
+      // Configurar cámara
+      cameraRef.current = new Camera(videoRef.current, {
+        onFrame: async () => {
+          if (videoRef.current) {
+            await faceDetectionRef.current.send({ image: videoRef.current });
+          }
+        },
+        width: 640,
+        height: 480
+      });
+      
+      await cameraRef.current.start();
+      setDetectionStatus('Cámara activa - Acércate a la cámara');
+      
+    } catch (error) {
+      console.error('Error starting camera:', error);
+      setAuthError('No se pudo acceder a la cámara. Verifica los permisos.');
+    }
+  }, []);
+
+  // Logout function
+  const logout = useCallback(() => {
+    // Detener cámara si está activa
+    if (cameraRef.current) {
+      cameraRef.current.stop();
+    }
+    setIsAuthenticated(false);
+    setAuthError('');
+    setFaceDetected(false);
+    setDetectionStatus('Preparando cámara...');
+  }, []);
+
+  // Resto de tus funciones existentes (setModoEmpresa, setModoUsuario, etc.)
   const setModoEmpresa = useCallback(() => setModo('empresa'), []);
   const setModoUsuario = useCallback(() => setModo('usuario'), []);
 
@@ -23,11 +200,9 @@ const FinancialChart = () => {
       const empresaTransacciones = [];
       const usuarioTransacciones = [];
 
-      // Generate data for each month
       months.forEach(month => {
         const [year, monthNum] = month.split('-');
         
-        // Company data (larger amounts)
         const companyIncomeCount = Math.floor(Math.random() * 8) + 5;
         const companyExpenseCount = Math.floor(Math.random() * 15) + 10;
         
@@ -49,7 +224,6 @@ const FinancialChart = () => {
           });
         }
 
-        // User data (smaller amounts)
         const userIncomeCount = Math.floor(Math.random() * 3) + 2;
         const userExpenseCount = Math.floor(Math.random() * 10) + 8;
         
@@ -78,16 +252,19 @@ const FinancialChart = () => {
       };
     };
 
-    const timer = setTimeout(() => {
-      setDatos(generateSampleData());
-      setLoading(false);
-    }, 800);
+    if (isAuthenticated) {
+      const timer = setTimeout(() => {
+        setDatos(generateSampleData());
+        setLoading(false);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated]);
 
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Process data by month
+  // Resto de tus useMemo functions (datosPorMes, mesesDisponibles, etc.) se mantienen igual
   const datosPorMes = useMemo(() => {
+    if (!isAuthenticated) return [];
+    
     const transacciones = modo === 'empresa' 
       ? datos.empresa?.transacciones || []
       : datos.usuarios?.transacciones || [];
@@ -124,12 +301,10 @@ const FinancialChart = () => {
       monthlyData[mesKey].balance = monthlyData[mesKey].ingresos - monthlyData[mesKey].gastos;
     });
 
-    // Convert to array and sort by date
     return Object.values(monthlyData)
       .sort((a, b) => a.fecha - b.fecha);
-  }, [modo, datos]);
+  }, [modo, datos, isAuthenticated]);
 
-  // Get available months for filter
   const mesesDisponibles = useMemo(() => {
     const months = datosPorMes.map(mes => ({
       value: mes.key,
@@ -138,7 +313,6 @@ const FinancialChart = () => {
     return [{ value: 'all', label: 'Todos los meses' }, ...months];
   }, [datosPorMes]);
 
-  // Filter data based on selected month
   const datosFiltrados = useMemo(() => {
     if (selectedMonth === 'all') {
       return datosPorMes;
@@ -146,7 +320,6 @@ const FinancialChart = () => {
     return datosPorMes.filter(mes => mes.key === selectedMonth);
   }, [datosPorMes, selectedMonth]);
 
-  // Calculate overall metrics
   const metricas = useMemo(() => {
     const dataToUse = selectedMonth === 'all' ? datosPorMes : datosFiltrados;
     
@@ -169,6 +342,173 @@ const FinancialChart = () => {
     };
   }, [datosPorMes, datosFiltrados, selectedMonth]);
 
+  // Authentication Screen con MediaPipe
+  if (!isAuthenticated) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        fontFamily: 'Arial, sans-serif',
+        padding: '20px'
+      }}>
+        <div style={{
+          backgroundColor: 'rgba(255,255,255,0.95)',
+          padding: '30px',
+          borderRadius: '20px',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+          textAlign: 'center',
+          maxWidth: '800px',
+          width: '100%'
+        }}>
+          <div style={{ fontSize: '3em', marginBottom: '20px' }}>👁️</div>
+          
+          <h1 style={{ color: '#2c3e50', marginBottom: '10px', fontSize: '2em' }}>
+            Reconocimiento Facial
+          </h1>
+          
+          <p style={{ color: '#7f8c8d', marginBottom: '30px', fontSize: '1.1em' }}>
+            Sistema de autenticación biométrica con IA
+          </p>
+
+          {!isFaceIdAvailable ? (
+            <div style={{
+              padding: '20px',
+              backgroundColor: '#f8f9fa',
+              borderRadius: '10px',
+              marginBottom: '20px'
+            }}>
+              <div style={{ color: '#e74c3c' }}>
+                ⚠️ Cargando sistema de reconocimiento facial...
+              </div>
+            </div>
+          ) : (
+            <>
+              {authError && (
+                <div style={{
+                  padding: '15px',
+                  backgroundColor: '#ffeaa7',
+                  color: '#e74c3c',
+                  borderRadius: '10px',
+                  marginBottom: '20px',
+                  border: '1px solid #fab1a0'
+                }}>
+                  {authError}
+                </div>
+              )}
+
+              {/* Área de la cámara */}
+              <div style={{
+                position: 'relative',
+                width: '100%',
+                maxWidth: '640px',
+                margin: '0 auto 20px',
+                borderRadius: '10px',
+                overflow: 'hidden',
+                backgroundColor: '#000'
+              }}>
+                <video 
+                  ref={videoRef}
+                  style={{
+                    width: '100%',
+                    height: 'auto',
+                    display: 'block',
+                    transform: 'scaleX(-1)' // Espejo para mejor experiencia
+                  }}
+                  playsInline
+                />
+                <canvas 
+                  ref={canvasRef}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%'
+                  }}
+                  width="640"
+                  height="480"
+                />
+              </div>
+
+              {/* Estado de detección */}
+              <div style={{
+                padding: '15px',
+                backgroundColor: faceDetected ? '#d4edda' : '#f8f9fa',
+                color: faceDetected ? '#155724' : '#6c757d',
+                borderRadius: '10px',
+                marginBottom: '20px',
+                border: `2px solid ${faceDetected ? '#c3e6cb' : '#e9ecef'}`,
+                fontWeight: 'bold'
+              }}>
+                {isAuthenticating ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{
+                      width: '20px',
+                      height: '20px',
+                      border: '2px solid transparent',
+                      borderTop: '2px solid currentColor',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite',
+                      marginRight: '10px'
+                    }}></div>
+                    Verificando identidad...
+                  </div>
+                ) : (
+                  detectionStatus
+                )}
+              </div>
+
+              <button
+                onClick={startFaceIdAuthentication}
+                disabled={isAuthenticating}
+                style={{
+                  padding: '15px 30px',
+                  backgroundColor: isAuthenticating ? '#bdc3c7' : '#3498db',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '50px',
+                  cursor: isAuthenticating ? 'not-allowed' : 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '16px',
+                  width: '100%',
+                  maxWidth: '300px',
+                  marginBottom: '15px',
+                  transition: 'all 0.3s',
+                  opacity: isAuthenticating ? 0.7 : 1
+                }}
+              >
+                {isAuthenticating ? '🔍 Analizando Rostro...' : '🎥 Iniciar Reconocimiento Facial'}
+              </button>
+
+              <div style={{
+                fontSize: '12px',
+                color: '#95a5a6',
+                textAlign: 'center'
+              }}>
+                <p>• Asegúrate de tener buena iluminación</p>
+                <p>• Mira directamente a la cámara</p>
+                <p>• Permite el acceso a la cámara cuando se solicite</p>
+              </div>
+            </>
+          )}
+        </div>
+
+        <style>
+          {`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}
+        </style>
+      </div>
+    );
+  }
+
+  // El resto de tu componente (loading y dashboard) se mantiene igual...
   if (loading) {
     return (
       <div style={{
@@ -178,9 +518,21 @@ const FinancialChart = () => {
         height: '100vh',
         fontSize: '20px',
         color: 'white',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        flexDirection: 'column'
       }}>
-        Generando datos mensuales...
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{
+            width: '50px',
+            height: '50px',
+            border: '3px solid transparent',
+            borderTop: '3px solid white',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto'
+          }}></div>
+        </div>
+        Cargando datos financieros seguros...
       </div>
     );
   }
@@ -192,24 +544,55 @@ const FinancialChart = () => {
       padding: '20px',
       fontFamily: 'Arial, sans-serif'
     }}>
+      {/* Security Header */}
       <div style={{
-        maxWidth: '1400px',
-        margin: '0 auto'
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '20px',
+        padding: '15px 25px',
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        borderRadius: '10px',
+        backdropFilter: 'blur(10px)'
       }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <div style={{ fontSize: '1.5em', marginRight: '10px' }}>🔒</div>
+          <div>
+            <div style={{ color: 'white', fontWeight: 'bold' }}>Sesión Segura</div>
+            <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.8em' }}>
+              Autenticado con Reconocimiento Facial IA
+            </div>
+          </div>
+        </div>
+        
+        <button
+          onClick={logout}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: 'rgba(255,255,255,0.2)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px'
+          }}
+        >
+          🚪 Cerrar Sesión
+        </button>
+      </div>
+
+      {/* El resto de tu dashboard permanece igual */}
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-          <h1 style={{
-            color: 'white',
-            fontSize: '2.5em',
-            marginBottom: '10px'
-          }}>
-            📊 Análisis Mensual
+          <h1 style={{ color: 'white', fontSize: '2.5em', marginBottom: '10px' }}>
+            📊 Análisis Mensual Seguro
           </h1>
-          <p style={{
-            color: 'rgba(255,255,255,0.8)',
-            fontSize: '1.1em'
-          }}>
-            Comparativa de Ingresos vs Gastos por Mes
+          <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: '1.1em' }}>
+            Autenticado con Reconocimiento Facial - Comparativa de Ingresos vs Gastos
           </p>
         </div>
 
@@ -220,7 +603,6 @@ const FinancialChart = () => {
           gap: '20px',
           marginBottom: '30px'
         }}>
-          {/* Mode Selector */}
           <div style={{ textAlign: 'center' }}>
             <label style={{ color: 'white', marginBottom: '8px', display: 'block' }}>
               Tipo de Datos:
@@ -257,7 +639,6 @@ const FinancialChart = () => {
             </div>
           </div>
 
-          {/* Month Filter */}
           <div style={{ textAlign: 'center' }}>
             <label style={{ color: 'white', marginBottom: '8px', display: 'block' }}>
               Filtro por Mes:
@@ -274,9 +655,7 @@ const FinancialChart = () => {
               }}
             >
               {mesesDisponibles.map(mes => (
-                <option key={mes.value} value={mes.value}>
-                  {mes.label}
-                </option>
+                <option key={mes.value} value={mes.value}>{mes.label}</option>
               ))}
             </select>
           </div>
@@ -337,9 +716,7 @@ const FinancialChart = () => {
                 : `$${(metricas.balance / 1000).toFixed(1)}K`
               }
             </div>
-            <div style={{ fontSize: '0.8em', opacity: 0.9 }}>
-              Balance
-            </div>
+            <div style={{ fontSize: '0.8em', opacity: 0.9 }}>Balance</div>
           </div>
         </div>
 
@@ -351,29 +728,14 @@ const FinancialChart = () => {
           boxShadow: '0 8px 25px rgba(0,0,0,0.1)',
           marginBottom: '25px'
         }}>
-          <h3 style={{ 
-            textAlign: 'center', 
-            color: '#2c3e50', 
-            marginBottom: '20px'
-          }}>
+          <h3 style={{ textAlign: 'center', color: '#2c3e50', marginBottom: '20px' }}>
             📈 Comparativa Mensual - {modo === 'empresa' ? 'Empresa' : 'Personal'}
           </h3>
           
-          <div style={{ 
-            maxHeight: '400px', 
-            overflowY: 'auto',
-            borderRadius: '8px'
-          }}>
-            <table style={{ 
-              width: '100%', 
-              borderCollapse: 'collapse',
-              fontSize: '14px'
-            }}>
+          <div style={{ maxHeight: '400px', overflowY: 'auto', borderRadius: '8px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
               <thead>
-                <tr style={{ 
-                  backgroundColor: '#34495e',
-                  color: 'white'
-                }}>
+                <tr style={{ backgroundColor: '#34495e', color: 'white' }}>
                   <th style={{ padding: '12px', textAlign: 'left' }}>Mes</th>
                   <th style={{ padding: '12px', textAlign: 'right' }}>Ingresos</th>
                   <th style={{ padding: '12px', textAlign: 'right' }}>Gastos</th>
@@ -383,45 +745,18 @@ const FinancialChart = () => {
               </thead>
               <tbody>
                 {datosFiltrados.map((mes, index) => (
-                  <tr 
-                    key={mes.key}
-                    style={{ 
-                      backgroundColor: index % 2 === 0 ? '#f8f9fa' : 'white'
-                    }}
-                  >
-                    <td style={{ padding: '12px', fontWeight: 'bold' }}>
-                      {mes.label}
-                    </td>
-                    <td style={{ 
-                      padding: '12px', 
-                      textAlign: 'right', 
-                      color: '#27ae60',
-                      fontWeight: 'bold'
-                    }}>
+                  <tr key={mes.key} style={{ backgroundColor: index % 2 === 0 ? '#f8f9fa' : 'white' }}>
+                    <td style={{ padding: '12px', fontWeight: 'bold' }}>{mes.label}</td>
+                    <td style={{ padding: '12px', textAlign: 'right', color: '#27ae60', fontWeight: 'bold' }}>
                       ${mes.ingresos.toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                     </td>
-                    <td style={{ 
-                      padding: '12px', 
-                      textAlign: 'right', 
-                      color: '#e74c3c',
-                      fontWeight: 'bold'
-                    }}>
+                    <td style={{ padding: '12px', textAlign: 'right', color: '#e74c3c', fontWeight: 'bold' }}>
                       ${mes.gastos.toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                     </td>
-                    <td style={{ 
-                      padding: '12px', 
-                      textAlign: 'right', 
-                      color: mes.balance >= 0 ? '#27ae60' : '#e74c3c',
-                      fontWeight: 'bold'
-                    }}>
+                    <td style={{ padding: '12px', textAlign: 'right', color: mes.balance >= 0 ? '#27ae60' : '#e74c3c', fontWeight: 'bold' }}>
                       ${mes.balance.toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                     </td>
-                    <td style={{ 
-                      padding: '12px', 
-                      textAlign: 'center'
-                    }}>
-                      {mes.transacciones}
-                    </td>
+                    <td style={{ padding: '12px', textAlign: 'center' }}>{mes.transacciones}</td>
                   </tr>
                 ))}
               </tbody>
@@ -429,6 +764,15 @@ const FinancialChart = () => {
           </div>
         </div>
       </div>
+
+      <style>
+        {`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}
+      </style>
     </div>
   );
 };
