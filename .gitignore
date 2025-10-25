@@ -1,0 +1,12 @@
+# Ignorar archivos grandes
+finanzas_empresa.json
+finanzas_personales.json}
+*.json
+!package.json
+!tsconfig.json
+
+# También cualquier JSON en la carpeta data
+banorteMCP/*.json
+
+# Y node_modules (por seguridad)
+node_modules/
