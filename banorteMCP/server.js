@@ -1,4 +1,4 @@
-// server.js - API REST con Gemini AI para Banorte (con lectura/escritura JSON)
+// server.js - API REST con Gemini AI para Banorte (ACTUALIZADO con tus JSON)
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -6,7 +6,6 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,433 +21,334 @@ app.use(express.json());
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'TU_API_KEY_AQUI');
 const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
-// Ruta del archivo JSON con datos del usuario
-const DATA_FILE = path.join(__dirname, 'datos-usuario.json');
-
-// Categorías y límites recomendados
-const CATEGORIAS_LIMITES = {
-  "Alimentos": 15, "Gasolina": 8, "Restaurantes": 5,
-  "Servicios": 10, "Entretenimiento": 5, "Renta": 30,
-  "Salud": 5, "Compras": 10,
-};
+// Rutas de archivos JSON
+const FINANZAS_PERSONALES = path.join(__dirname, 'data', 'finanzas_personales.json');
+const FINANZAS_EMPRESAS = path.join(__dirname, 'data', 'finanzas_empresas.json');
 
 // ============= FUNCIONES DE MANEJO DE DATOS =============
 
-// Leer datos del JSON
-async function leerDatos() {
+// Leer finanzas personales
+async function leerFinanzasPersonales() {
   try {
-    const data = await fs.readFile(DATA_FILE, 'utf-8');
+    const data = await fs.readFile(FINANZAS_PERSONALES, 'utf-8');
     return JSON.parse(data);
   } catch (error) {
-    // Si el archivo no existe, crear uno con datos por defecto
-    const datosDefault = {
-      perfilUsuario: {
-        nombre: "Usuario Demo",
-        edad: 32,
-        ocupacion: "Profesional",
-        ingresoMensual: 15000,
-        objetivosFinancieros: ["ahorro", "inversion"],
-      },
-      cuentas: [
-        { id: "CTA001", tipo: "Cuenta de Débito", saldo: 25000, moneda: "MXN" },
-        { id: "CTA002", tipo: "Cuenta de Ahorro", saldo: 50000, moneda: "MXN" },
-      ],
-      transacciones: [
-        { fecha: "2025-10-20", monto: -500, categoria: "Alimentos", comercio: "Soriana" },
-        { fecha: "2025-10-19", monto: -1200, categoria: "Gasolina", comercio: "Pemex" },
-        { fecha: "2025-10-18", monto: -350, categoria: "Restaurantes", comercio: "Starbucks" },
-        { fecha: "2025-10-17", monto: 15000, categoria: "Salario", comercio: "Empresa XYZ" },
-        { fecha: "2025-10-15", monto: -2500, categoria: "Servicios", comercio: "CFE" },
-        { fecha: "2025-10-14", monto: -800, categoria: "Entretenimiento", comercio: "Cinépolis" },
-        { fecha: "2025-10-12", monto: -4500, categoria: "Renta", comercio: "Inmobiliaria" },
-        { fecha: "2025-10-10", monto: -600, categoria: "Alimentos", comercio: "HEB" },
-        { fecha: "2025-10-08", monto: -1500, categoria: "Salud", comercio: "Farmacia Guadalajara" },
-        { fecha: "2025-10-05", monto: -3000, categoria: "Compras", comercio: "Liverpool" },
-      ],
-      tarjetasCredito: [
-        {
-          id: "TDC001",
-          tipo: "Banorte Clásica",
-          limiteCredito: 30000,
-          saldoActual: 12000,
-          fechaCorte: "2025-10-28",
-          pagoMinimo: 600,
-        },
-      ],
-    };
-    
-    await guardarDatos(datosDefault);
-    return datosDefault;
+    console.error('Error leyendo finanzas personales:', error);
+    return [];
   }
 }
 
-// Guardar datos en el JSON
-async function guardarDatos(datos) {
+// Leer finanzas empresariales
+async function leerFinanzasEmpresas() {
   try {
-    await fs.writeFile(DATA_FILE, JSON.stringify(datos, null, 2), 'utf-8');
-    return { success: true };
+    const data = await fs.readFile(FINANZAS_EMPRESAS, 'utf-8');
+    const lineas = JSON.parse(data);
+    // Convertir de formato CSV-like a objetos
+    const headers = lineas[0];
+    return lineas.slice(1).map(row => ({
+      empresa_id: row[0],
+      fecha: row[1],
+      tipo: row[2],
+      concepto: row[3],
+      categoria: row[4],
+      monto: row[5],
+    }));
   } catch (error) {
-    console.error('Error guardando datos:', error);
-    throw error;
+    console.error('Error leyendo finanzas empresariales:', error);
+    return [];
   }
 }
 
-// Función helper para calcular métricas financieras
-function calcularMetricasFinancieras(datos) {
-  const totalIngresos = datos.transacciones
-    .filter(t => t.monto > 0)
-    .reduce((sum, t) => sum + t.monto, 0);
+// Calcular métricas de finanzas personales
+function calcularMetricasPersonales(transacciones, idUsuario) {
+  const transaccionesUsuario = transacciones.filter(t => t.id_usuario === idUsuario);
   
-  const totalGastos = Math.abs(
-    datos.transacciones
-      .filter(t => t.monto < 0)
-      .reduce((sum, t) => sum + t.monto, 0)
-  );
-
+  const ingresos = transaccionesUsuario.filter(t => t.tipo === 'ingreso');
+  const gastos = transaccionesUsuario.filter(t => t.tipo === 'gasto');
+  
+  const totalIngresos = ingresos.reduce((sum, t) => sum + t.monto, 0);
+  const totalGastos = gastos.reduce((sum, t) => sum + t.monto, 0);
+  
   const gastosPorCategoria = {};
-  datos.transacciones.forEach(tx => {
-    if (tx.monto < 0) {
-      gastosPorCategoria[tx.categoria] = (gastosPorCategoria[tx.categoria] || 0) + Math.abs(tx.monto);
-    }
+  gastos.forEach(t => {
+    gastosPorCategoria[t.categoria] = (gastosPorCategoria[t.categoria] || 0) + t.monto;
   });
-
-  const saldoTotal = datos.cuentas.reduce((sum, c) => sum + c.saldo, 0);
-  const tarjeta = datos.tarjetasCredito[0];
-  const utilizacionCredito = ((tarjeta.saldoActual / tarjeta.limiteCredito) * 100).toFixed(2);
-
+  
   return {
     totalIngresos,
     totalGastos,
-    saldoNeto: totalIngresos - totalGastos,
+    balance: totalIngresos - totalGastos,
     gastosPorCategoria,
-    saldoTotal,
-    utilizacionCredito,
-    tarjeta,
+    numeroTransacciones: transaccionesUsuario.length,
+    tasaAhorro: totalIngresos > 0 ? ((totalIngresos - totalGastos) / totalIngresos * 100).toFixed(2) : 0,
   };
 }
 
-// ============= ENDPOINTS DE GESTIÓN DE DATOS =============
+// Calcular métricas empresariales
+function calcularMetricasEmpresa(transacciones, empresaId) {
+  const transaccionesEmpresa = transacciones.filter(t => t.empresa_id === empresaId);
+  
+  const ingresos = transaccionesEmpresa.filter(t => t.tipo === 'ingreso');
+  const gastos = transaccionesEmpresa.filter(t => t.tipo === 'gasto');
+  
+  const totalIngresos = ingresos.reduce((sum, t) => sum + t.monto, 0);
+  const totalGastos = gastos.reduce((sum, t) => sum + t.monto, 0);
+  
+  const gastosPorCategoria = {};
+  gastos.forEach(t => {
+    gastosPorCategoria[t.categoria] = (gastosPorCategoria[t.categoria] || 0) + t.monto;
+  });
+  
+  const margenUtilidad = totalIngresos > 0 ? ((totalIngresos - totalGastos) / totalIngresos * 100).toFixed(2) : 0;
+  
+  return {
+    totalIngresos,
+    totalGastos,
+    balance: totalIngresos - totalGastos,
+    gastosPorCategoria,
+    margenUtilidad,
+    numeroTransacciones: transaccionesEmpresa.length,
+  };
+}
 
-// GET /api/datos - Obtener todos los datos del usuario
-app.get('/api/datos', async (req, res) => {
-  try {
-    const datos = await leerDatos();
-    res.json(datos);
-  } catch (error) {
-    res.status(500).json({ error: 'Error al leer datos', detalle: error.message });
-  }
-});
+// ============= ENDPOINTS PARA FINANZAS PERSONALES =============
 
-// POST /api/datos - Reemplazar todos los datos (cuidado, sobrescribe todo)
-app.post('/api/datos', async (req, res) => {
+// GET /api/finanzas-personales/:id_usuario - Análisis de un usuario
+app.get('/api/finanzas-personales/:id_usuario', async (req, res) => {
   try {
-    const nuevosDatos = req.body;
-    await guardarDatos(nuevosDatos);
-    res.json({ 
-      success: true, 
-      mensaje: 'Datos actualizados correctamente',
-      datos: nuevosDatos 
+    const idUsuario = parseInt(req.params.id_usuario);
+    const transacciones = await leerFinanzasPersonales();
+    const metricas = calcularMetricasPersonales(transacciones, idUsuario);
+    
+    const transaccionesUsuario = transacciones.filter(t => t.id_usuario === idUsuario);
+    
+    res.json({
+      id_usuario: idUsuario,
+      metricas,
+      transacciones: transaccionesUsuario,
+      alertas: [
+        metricas.balance < 0 ? `⚠️ Balance negativo: -$${Math.abs(metricas.balance).toFixed(2)}` : null,
+        metricas.tasaAhorro < 10 ? `⚠️ Tasa de ahorro baja: ${metricas.tasaAhorro}%` : null,
+      ].filter(Boolean),
     });
   } catch (error) {
-    res.status(500).json({ error: 'Error al guardar datos', detalle: error.message });
+    res.status(500).json({ error: 'Error al obtener finanzas personales', detalle: error.message });
   }
 });
 
-// PUT /api/perfil - Actualizar perfil del usuario
-app.put('/api/perfil', async (req, res) => {
+// GET /api/finanzas-empresas/:empresa_id - Análisis de una empresa
+app.get('/api/finanzas-empresas/:empresa_id', async (req, res) => {
   try {
-    const datos = await leerDatos();
-    datos.perfilUsuario = { ...datos.perfilUsuario, ...req.body };
-    await guardarDatos(datos);
-    res.json({ 
-      success: true, 
-      mensaje: 'Perfil actualizado',
-      perfil: datos.perfilUsuario 
+    const empresaId = req.params.empresa_id;
+    const transacciones = await leerFinanzasEmpresas();
+    const metricas = calcularMetricasEmpresa(transacciones, empresaId);
+    
+    const transaccionesEmpresa = transacciones.filter(t => t.empresa_id === empresaId);
+    
+    res.json({
+      empresa_id: empresaId,
+      metricas,
+      transacciones: transaccionesEmpresa,
+      alertas: [
+        metricas.balance < 0 ? `⚠️ Balance negativo: -$${Math.abs(metricas.balance).toFixed(2)}` : null,
+        metricas.margenUtilidad < 10 ? `⚠️ Margen de utilidad bajo: ${metricas.margenUtilidad}%` : null,
+      ].filter(Boolean),
     });
   } catch (error) {
-    res.status(500).json({ error: 'Error al actualizar perfil', detalle: error.message });
+    res.status(500).json({ error: 'Error al obtener finanzas empresariales', detalle: error.message });
   }
 });
 
-// POST /api/transacciones - Agregar nueva transacción
-app.post('/api/transacciones', async (req, res) => {
+// POST /api/agregar-transaccion-personal - Agregar transacción personal
+app.post('/api/agregar-transaccion-personal', async (req, res) => {
   try {
-    const datos = await leerDatos();
+    const { id_usuario, categoria, descripcion, monto, tipo } = req.body;
+    
+    const transacciones = await leerFinanzasPersonales();
     const nuevaTransaccion = {
-      fecha: req.body.fecha || new Date().toISOString().split('T')[0],
-      monto: parseFloat(req.body.monto),
-      categoria: req.body.categoria,
-      comercio: req.body.comercio || 'No especificado',
+      id_usuario,
+      fecha: Math.floor(Date.now() / 86400000) + 25569, // Convertir a formato Excel
+      categoria,
+      descripcion,
+      monto: parseFloat(monto),
+      tipo,
     };
     
-    datos.transacciones.unshift(nuevaTransaccion); // Agrega al inicio
+    transacciones.push(nuevaTransaccion);
+    await fs.writeFile(FINANZAS_PERSONALES, JSON.stringify(transacciones, null, 2), 'utf-8');
     
-    // Actualizar saldo de cuenta si es necesario
-    if (req.body.actualizarSaldo) {
-      const cuenta = datos.cuentas.find(c => c.id === (req.body.cuentaId || 'CTA001'));
-      if (cuenta) {
-        cuenta.saldo += nuevaTransaccion.monto;
-      }
-    }
-    
-    await guardarDatos(datos);
-    res.json({ 
-      success: true, 
-      mensaje: 'Transacción agregada',
-      transaccion: nuevaTransaccion 
+    res.json({
+      success: true,
+      mensaje: 'Transacción agregada correctamente',
+      transaccion: nuevaTransaccion,
     });
   } catch (error) {
     res.status(500).json({ error: 'Error al agregar transacción', detalle: error.message });
   }
 });
 
-// DELETE /api/transacciones/:indice - Eliminar transacción
-app.delete('/api/transacciones/:indice', async (req, res) => {
+// POST /api/agregar-transaccion-empresa - Agregar transacción empresarial
+app.post('/api/agregar-transaccion-empresa', async (req, res) => {
   try {
-    const datos = await leerDatos();
-    const indice = parseInt(req.params.indice);
+    const { empresa_id, tipo, concepto, categoria, monto } = req.body;
     
-    if (indice >= 0 && indice < datos.transacciones.length) {
-      const eliminada = datos.transacciones.splice(indice, 1)[0];
-      await guardarDatos(datos);
-      res.json({ 
-        success: true, 
-        mensaje: 'Transacción eliminada',
-        transaccion: eliminada 
-      });
-    } else {
-      res.status(404).json({ error: 'Transacción no encontrada' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Error al eliminar transacción', detalle: error.message });
-  }
-});
-
-// PUT /api/cuentas/:id - Actualizar saldo de cuenta
-app.put('/api/cuentas/:id', async (req, res) => {
-  try {
-    const datos = await leerDatos();
-    const cuenta = datos.cuentas.find(c => c.id === req.params.id);
+    const data = await fs.readFile(FINANZAS_EMPRESAS, 'utf-8');
+    const lineas = JSON.parse(data);
     
-    if (cuenta) {
-      cuenta.saldo = parseFloat(req.body.saldo);
-      await guardarDatos(datos);
-      res.json({ 
-        success: true, 
-        mensaje: 'Saldo actualizado',
-        cuenta 
-      });
-    } else {
-      res.status(404).json({ error: 'Cuenta no encontrada' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Error al actualizar cuenta', detalle: error.message });
-  }
-});
-
-// PUT /api/tarjetas/:id - Actualizar tarjeta de crédito
-app.put('/api/tarjetas/:id', async (req, res) => {
-  try {
-    const datos = await leerDatos();
-    const tarjeta = datos.tarjetasCredito.find(t => t.id === req.params.id);
+    const nuevaFila = [
+      empresa_id,
+      new Date().toISOString(),
+      tipo,
+      concepto,
+      categoria,
+      parseFloat(monto),
+    ];
     
-    if (tarjeta) {
-      Object.assign(tarjeta, req.body);
-      await guardarDatos(datos);
-      res.json({ 
-        success: true, 
-        mensaje: 'Tarjeta actualizada',
-        tarjeta 
-      });
-    } else {
-      res.status(404).json({ error: 'Tarjeta no encontrada' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Error al actualizar tarjeta', detalle: error.message });
-  }
-});
-
-// POST /api/importar - Importar datos desde JSON (para cargar archivo del usuario)
-app.post('/api/importar', async (req, res) => {
-  try {
-    const datosImportados = req.body;
+    lineas.push(nuevaFila);
+    await fs.writeFile(FINANZAS_EMPRESAS, JSON.stringify(lineas, null, 2), 'utf-8');
     
-    // Validar estructura básica
-    if (!datosImportados.cuentas || !datosImportados.transacciones) {
-      return res.status(400).json({ 
-        error: 'Estructura de datos inválida',
-        detalle: 'Se requieren al menos "cuentas" y "transacciones"'
-      });
-    }
-    
-    await guardarDatos(datosImportados);
-    res.json({ 
-      success: true, 
-      mensaje: 'Datos importados correctamente',
-      resumen: {
-        cuentas: datosImportados.cuentas.length,
-        transacciones: datosImportados.transacciones.length,
-        tarjetas: datosImportados.tarjetasCredito?.length || 0,
-      }
+    res.json({
+      success: true,
+      mensaje: 'Transacción empresarial agregada',
+      transaccion: {
+        empresa_id,
+        fecha: nuevaFila[1],
+        tipo,
+        concepto,
+        categoria,
+        monto: nuevaFila[5],
+      },
     });
   } catch (error) {
-    res.status(500).json({ error: 'Error al importar datos', detalle: error.message });
-  }
-});
-
-// GET /api/exportar - Exportar todos los datos
-app.get('/api/exportar', async (req, res) => {
-  try {
-    const datos = await leerDatos();
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', 'attachment; filename=datos-banorte.json');
-    res.json(datos);
-  } catch (error) {
-    res.status(500).json({ error: 'Error al exportar datos', detalle: error.message });
+    res.status(500).json({ error: 'Error al agregar transacción empresarial', detalle: error.message });
   }
 });
 
 // ============= ENDPOINTS CON GEMINI AI =============
 
-// POST /api/chat - Chat con asistente financiero
-app.post('/api/chat', async (req, res) => {
+// POST /api/consultar-asistente-personal - Consulta con IA para finanzas personales
+app.post('/api/consultar-asistente-personal', async (req, res) => {
   try {
-    const { mensaje } = req.body;
-    if (!mensaje) {
-      return res.status(400).json({ error: 'El mensaje es requerido' });
+    const { id_usuario, pregunta } = req.body;
+    
+    if (!id_usuario || !pregunta) {
+      return res.status(400).json({ error: 'Se requiere id_usuario y pregunta' });
     }
+    
+    const transacciones = await leerFinanzasPersonales();
+    const metricas = calcularMetricasPersonales(transacciones, id_usuario);
+    
+    const prompt = `Eres un asesor financiero personal experto de Banorte México.
 
-    const datos = await leerDatos();
-    const metricas = calcularMetricasFinancieras(datos);
-
-    const promptSistema = `Eres un asistente financiero experto de Banorte México. 
-
-DATOS FINANCIEROS DEL USUARIO:
-- Nombre: ${datos.perfilUsuario.nombre}
-- Ingreso mensual: $${metricas.totalIngresos.toLocaleString('es-MX')} MXN
-- Gastos mensuales: $${metricas.totalGastos.toLocaleString('es-MX')} MXN
-- Saldo total en cuentas: $${metricas.saldoTotal.toLocaleString('es-MX')} MXN
-- Saldo neto mensual: $${metricas.saldoNeto.toLocaleString('es-MX')} MXN
-- Utilización de crédito: ${metricas.utilizacionCredito}%
-- Deuda tarjeta: $${metricas.tarjeta.saldoActual.toLocaleString('es-MX')} MXN
+SITUACIÓN FINANCIERA DEL USUARIO ${id_usuario}:
+- Ingresos totales: $${metricas.totalIngresos.toLocaleString('es-MX')} MXN
+- Gastos totales: $${metricas.totalGastos.toLocaleString('es-MX')} MXN
+- Balance: $${metricas.balance.toLocaleString('es-MX')} MXN
+- Tasa de ahorro: ${metricas.tasaAhorro}%
 
 GASTOS POR CATEGORÍA:
 ${Object.entries(metricas.gastosPorCategoria)
+  .sort((a, b) => b[1] - a[1])
   .map(([cat, monto]) => `- ${cat}: $${monto.toLocaleString('es-MX')} MXN`)
   .join('\n')}
 
-INSTRUCCIONES:
-1. Responde en español de México
-2. Sé conciso (máximo 250 palabras)
-3. Usa datos reales del usuario
-4. Da recomendaciones accionables
-5. Tono amigable pero profesional
+PREGUNTA DEL USUARIO:
+${pregunta}
 
-PREGUNTA: ${mensaje}`;
+Responde de manera profesional, clara y con recomendaciones accionables basadas en los datos reales. Máximo 300 palabras.`;
 
-    const result = await model.generateContent(promptSistema);
+    const result = await model.generateContent(prompt);
     const response = await result.response;
-    const respuestaGemini = response.text();
-
+    
     res.json({
-      respuesta: respuestaGemini,
-      metricas: {
-        saldoTotal: metricas.saldoTotal,
-        utilizacionCredito: metricas.utilizacionCredito,
-        saldoNeto: metricas.saldoNeto,
-      },
+      respuesta: response.text(),
+      metricas,
       timestamp: new Date().toISOString(),
     });
-
+    
   } catch (error) {
     console.error('Error en Gemini:', error);
-    res.status(500).json({ error: 'Error al procesar solicitud' });
+    res.status(500).json({ error: 'Error al procesar consulta con IA' });
   }
 });
 
-// POST /api/analisis-inteligente - Análisis con IA
-app.post('/api/analisis-inteligente', async (req, res) => {
+// POST /api/consultar-asistente-empresa - Consulta con IA para empresa
+app.post('/api/consultar-asistente-empresa', async (req, res) => {
   try {
-    const datos = await leerDatos();
-    const metricas = calcularMetricasFinancieras(datos);
+    const { empresa_id, pregunta } = req.body;
+    
+    if (!empresa_id || !pregunta) {
+      return res.status(400).json({ error: 'Se requiere empresa_id y pregunta' });
+    }
+    
+    const transacciones = await leerFinanzasEmpresas();
+    const metricas = calcularMetricasEmpresa(transacciones, empresa_id);
+    
+    const prompt = `Eres un asesor financiero empresarial experto de Banorte México.
 
-    const prompt = `Analiza esta situación financiera y responde en JSON:
+SITUACIÓN FINANCIERA DE LA EMPRESA ${empresa_id}:
+- Ingresos totales: $${metricas.totalIngresos.toLocaleString('es-MX')} MXN
+- Gastos totales: $${metricas.totalGastos.toLocaleString('es-MX')} MXN
+- Balance: $${metricas.balance.toLocaleString('es-MX')} MXN
+- Margen de utilidad: ${metricas.margenUtilidad}%
+
+GASTOS POR CATEGORÍA:
+${Object.entries(metricas.gastosPorCategoria)
+  .sort((a, b) => b[1] - a[1])
+  .map(([cat, monto]) => `- ${cat}: $${monto.toLocaleString('es-MX')} MXN`)
+  .join('\n')}
+
+CONSULTA:
+${pregunta}
+
+Responde con análisis profesional y recomendaciones estratégicas. Máximo 300 palabras.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    
+    res.json({
+      respuesta: response.text(),
+      metricas,
+      timestamp: new Date().toISOString(),
+    });
+    
+  } catch (error) {
+    console.error('Error en Gemini:', error);
+    res.status(500).json({ error: 'Error al procesar consulta con IA' });
+  }
+});
+
+// POST /api/recomendaciones-ia-personal - Recomendaciones con IA
+app.post('/api/recomendaciones-ia-personal', async (req, res) => {
+  try {
+    const { id_usuario } = req.body;
+    
+    const transacciones = await leerFinanzasPersonales();
+    const metricas = calcularMetricasPersonales(transacciones, id_usuario);
+    
+    const prompt = `Genera 3-5 recomendaciones financieras personalizadas.
 
 DATOS:
 - Ingresos: $${metricas.totalIngresos.toLocaleString('es-MX')}
 - Gastos: $${metricas.totalGastos.toLocaleString('es-MX')}
-- Saldo: $${metricas.saldoTotal.toLocaleString('es-MX')}
-- Utilización crédito: ${metricas.utilizacionCredito}%
+- Balance: $${metricas.balance.toLocaleString('es-MX')}
+- Tasa ahorro: ${metricas.tasaAhorro}%
 
 Gastos por categoría:
 ${Object.entries(metricas.gastosPorCategoria)
+  .sort((a, b) => b[1] - a[1])
   .map(([cat, monto]) => `${cat}: $${monto.toLocaleString('es-MX')}`)
   .join('\n')}
 
 Responde en JSON:
 {
-  "saludFinanciera": {
-    "puntuacion": 0-100,
-    "nivel": "Excelente/Buena/Regular/Necesita mejora",
-    "descripcion": "descripción breve"
-  },
-  "fortalezas": ["fortaleza1", "fortaleza2"],
-  "areasDeOportunidad": ["area1", "area2"],
-  "recomendacionesPrioritarias": [
-    {
-      "titulo": "título",
-      "descripcion": "descripción",
-      "impacto": "alto/medio/bajo"
-    }
-  ]
-}`;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    let analisisTexto = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    
-    let analisis;
-    try {
-      analisis = JSON.parse(analisisTexto);
-    } catch (e) {
-      analisis = { respuestaCompleta: analisisTexto };
-    }
-
-    res.json({
-      analisis,
-      datosBase: metricas,
-      timestamp: new Date().toISOString(),
-    });
-
-  } catch (error) {
-    res.status(500).json({ error: 'Error al generar análisis' });
-  }
-});
-
-// POST /api/recomendaciones-ia - Recomendaciones con IA
-app.post('/api/recomendaciones-ia', async (req, res) => {
-  try {
-    const { objetivo, presupuesto, plazo } = req.body;
-    const datos = await leerDatos();
-    const metricas = calcularMetricasFinancieras(datos);
-
-    const prompt = `Genera 3-5 recomendaciones financieras específicas.
-
-SITUACIÓN:
-- Objetivo: ${objetivo || 'general'}
-- Ingreso: $${metricas.totalIngresos.toLocaleString('es-MX')}/mes
-- Ahorro: $${metricas.saldoNeto.toLocaleString('es-MX')}/mes
-- Deuda: $${metricas.tarjeta.saldoActual.toLocaleString('es-MX')}
-
-Responde en JSON:
-{
   "recomendaciones": [
     {
-      "titulo": "título",
-      "descripcion": "explicación",
-      "pasos": ["paso1", "paso2"],
-      "impactoFinanciero": "monto estimado",
-      "plazoImplementacion": "inmediato/1 mes/3 meses"
+      "tipo": "ahorro|alerta|oportunidad",
+      "prioridad": "alta|media|baja",
+      "titulo": "título breve",
+      "descripcion": "explicación detallada",
+      "impacto_estimado": monto numérico
     }
   ]
 }`;
@@ -463,118 +363,162 @@ Responde en JSON:
     } catch (e) {
       recomendaciones = { textoCompleto: texto };
     }
-
+    
     res.json({
       ...recomendaciones,
-      objetivo,
+      metricas,
       timestamp: new Date().toISOString(),
     });
-
+    
   } catch (error) {
     res.status(500).json({ error: 'Error al generar recomendaciones' });
   }
 });
 
-// ============= ENDPOINTS TRADICIONALES =============
-
-// GET /api/saldos
-app.get('/api/saldos', async (req, res) => {
+// POST /api/simular-whatif-personal - Simulador What-If
+app.post('/api/simular-whatif-personal', async (req, res) => {
   try {
-    const datos = await leerDatos();
-    const metricas = calcularMetricasFinancieras(datos);
+    const { 
+      id_usuario, 
+      reduccion_gastos_porcentaje = 0,
+      aumento_ingresos_porcentaje = 0,
+      nuevo_gasto_mensual = 0,
+      nuevo_ingreso_mensual = 0,
+      meses = 6 
+    } = req.body;
+    
+    const transacciones = await leerFinanzasPersonales();
+    const metricas = calcularMetricasPersonales(transacciones, id_usuario);
+    
+    // Calcular proyección
+    let ingresosMensuales = metricas.totalIngresos / 12;
+    let gastosMensuales = metricas.totalGastos / 12;
+    
+    if (reduccion_gastos_porcentaje > 0) {
+      gastosMensuales *= (1 - reduccion_gastos_porcentaje / 100);
+    }
+    if (aumento_ingresos_porcentaje > 0) {
+      ingresosMensuales *= (1 + aumento_ingresos_porcentaje / 100);
+    }
+    gastosMensuales += nuevo_gasto_mensual;
+    ingresosMensuales += nuevo_ingreso_mensual;
+    
+    const balanceMensual = ingresosMensuales - gastosMensuales;
+    const balanceProyectado = metricas.balance + (balanceMensual * meses);
+    
+    // Análisis con Gemini
+    const prompt = `Analiza este escenario financiero:
+
+ESCENARIO: ${meses} meses
+- Reducción gastos: ${reduccion_gastos_porcentaje}%
+- Aumento ingresos: ${aumento_ingresos_porcentaje}%
+- Nuevo gasto mensual: $${nuevo_gasto_mensual}
+- Nuevo ingreso mensual: $${nuevo_ingreso_mensual}
+
+RESULTADOS:
+- Balance actual: $${metricas.balance.toFixed(2)}
+- Balance proyectado: $${balanceProyectado.toFixed(2)}
+- Diferencia: $${(balanceProyectado - metricas.balance).toFixed(2)}
+
+Responde en JSON:
+{
+  "riesgos": ["riesgo1", "riesgo2"],
+  "oportunidades": ["oportunidad1", "oportunidad2"],
+  "analisis": "análisis breve"
+}`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    let texto = response.text().replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    
+    let analisisIA = {};
+    try {
+      analisisIA = JSON.parse(texto);
+    } catch (e) {
+      analisisIA = { analisis: texto };
+    }
     
     res.json({
-      cuentas: datos.cuentas,
-      tarjetasCredito: datos.tarjetasCredito.map(t => ({
-        ...t,
-        creditoDisponible: t.limiteCredito - t.saldoActual,
-        utilizacion: `${metricas.utilizacionCredito}%`,
-      })),
-      resumen: {
-        saldoTotal: metricas.saldoTotal,
-        creditoDisponible: metricas.tarjeta.limiteCredito - metricas.tarjeta.saldoActual,
-        patrimonio: metricas.saldoTotal - metricas.tarjeta.saldoActual,
+      escenario: {
+        reduccion_gastos_porcentaje,
+        aumento_ingresos_porcentaje,
+        nuevo_gasto_mensual,
+        nuevo_ingreso_mensual,
+        meses,
       },
+      proyeccion: {
+        balance_actual: metricas.balance,
+        balance_proyectado: balanceProyectado,
+        diferencia: balanceProyectado - metricas.balance,
+        flujo_mensual: balanceMensual,
+      },
+      analisis_ia: analisisIA,
+      timestamp: new Date().toISOString(),
     });
+    
   } catch (error) {
-    res.status(500).json({ error: 'Error al obtener saldos' });
+    res.status(500).json({ error: 'Error en simulación What-If' });
   }
 });
 
-// GET /api/transacciones
-app.get('/api/transacciones', async (req, res) => {
+// GET /api/comparar-categorias/:id_usuario - Comparar gastos por categoría
+app.get('/api/comparar-categorias/:id_usuario', async (req, res) => {
   try {
-    const datos = await leerDatos();
-    res.json(datos.transacciones);
-  } catch (error) {
-    res.status(500).json({ error: 'Error al obtener transacciones' });
-  }
-});
-
-// POST /api/analisis/transacciones
-app.post('/api/analisis/transacciones', async (req, res) => {
-  try {
-    const datos = await leerDatos();
-    const metricas = calcularMetricasFinancieras(datos);
-
-    const categoriasOrdenadas = Object.entries(metricas.gastosPorCategoria)
-      .sort(([, a], [, b]) => b - a)
-      .map(([cat, monto]) => ({
-        categoria: cat,
-        monto: monto,
-        porcentaje: ((monto / metricas.totalGastos) * 100).toFixed(2),
-        limiteRecomendado: CATEGORIAS_LIMITES[cat] || 10,
+    const idUsuario = parseInt(req.params.id_usuario);
+    const transacciones = await leerFinanzasPersonales();
+    const metricas = calcularMetricasPersonales(transacciones, idUsuario);
+    
+    const ranking = Object.entries(metricas.gastosPorCategoria)
+      .sort((a, b) => b[1] - a[1])
+      .map(([categoria, monto], index) => ({
+        posicion: index + 1,
+        categoria,
+        monto,
+        porcentaje: ((monto / metricas.totalGastos) * 100).toFixed(2) + '%',
       }));
-
+    
     res.json({
-      periodo: req.body.periodo || 'mes',
-      resumen: {
-        totalIngresos: metricas.totalIngresos,
-        totalGastos: metricas.totalGastos,
-        saldoNeto: metricas.saldoNeto,
-        numeroTransacciones: datos.transacciones.length,
-      },
-      gastosPorCategoria: categoriasOrdenadas,
+      total_gastos: metricas.totalGastos,
+      ranking_categorias: ranking,
     });
   } catch (error) {
-    res.status(500).json({ error: 'Error al analizar transacciones' });
+    res.status(500).json({ error: 'Error al comparar categorías' });
   }
 });
 
 // Ruta raíz
 app.get('/', (req, res) => {
   res.json({
-    mensaje: 'API Financiera Banorte con Gemini AI + Persistencia JSON',
-    version: '2.1.0',
+    mensaje: 'API Financiera Banorte con Gemini AI',
+    version: '3.0.0',
+    descripcion: 'Análisis financiero personal y empresarial con IA',
     endpoints: {
-      'Gestión de Datos': [
-        'GET  /api/datos - Obtener todos los datos',
-        'POST /api/datos - Actualizar todos los datos',
-        'PUT  /api/perfil - Actualizar perfil',
-        'POST /api/transacciones - Agregar transacción',
-        'DELETE /api/transacciones/:indice - Eliminar transacción',
-        'PUT  /api/cuentas/:id - Actualizar saldo cuenta',
-        'PUT  /api/tarjetas/:id - Actualizar tarjeta',
-        'POST /api/importar - Importar JSON',
-        'GET  /api/exportar - Exportar JSON',
+      'Finanzas Personales': [
+        'GET  /api/finanzas-personales/:id_usuario - Análisis completo',
+        'POST /api/agregar-transaccion-personal - Agregar transacción',
+        'POST /api/consultar-asistente-personal - Chat con IA',
+        'POST /api/recomendaciones-ia-personal - Recomendaciones IA',
+        'POST /api/simular-whatif-personal - Simulador What-If',
+        'GET  /api/comparar-categorias/:id_usuario - Ranking categorías',
       ],
-      'Con IA (Gemini)': [
-        'POST /api/chat - Chat con asistente',
-        'POST /api/analisis-inteligente - Análisis con IA',
-        'POST /api/recomendaciones-ia - Recomendaciones IA',
+      'Finanzas Empresariales': [
+        'GET  /api/finanzas-empresas/:empresa_id - Análisis completo',
+        'POST /api/agregar-transaccion-empresa - Agregar transacción',
+        'POST /api/consultar-asistente-empresa - Chat con IA',
       ],
-      'Tradicionales': [
-        'GET  /api/saldos',
-        'GET  /api/transacciones',
-        'POST /api/analisis/transacciones',
-      ],
+    },
+    ejemplos: {
+      usuarios_disponibles: [47, 7, 50],
+      empresas_disponibles: ['E016', 'E037'],
     },
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
-  console.log(`🤖 Gemini AI integrado`);
-  console.log(`💾 Datos persistentes en: ${DATA_FILE}`);
-  console.log(`📊 API lista para el hackathon`);
+  console.log(` Servidor corriendo en http://localhost:${PORT}`);
+  console.log(` Gemini AI integrado`);
+  console.log(` Leyendo datos de:`);
+  console.log(`   - ${FINANZAS_PERSONALES}`);
+  console.log(`   - ${FINANZAS_EMPRESAS}`);
+  console.log(` API lista para el hackathon`);
 });
