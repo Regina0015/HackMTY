@@ -572,8 +572,8 @@ app.get('/', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+app.listen(3001, () => {
+  console.log(`🚀 Servidor corriendo en http://localhost:${3001}`);
   console.log(`🤖 Gemini AI integrado`);
   console.log(`💾 Datos persistentes en: ${DATA_FILE}`);
   console.log(`📊 API lista para el hackathon`);
