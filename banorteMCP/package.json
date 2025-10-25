@@ -1,0 +1,37 @@
+{
+  "name": "banortemcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP Server para análisis financiero con IA",
+  "main": "build/index.js",
+  "bin": {
+    "banortemcp": "build/index.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "watch": "tsc --watch",
+    "mcp": "node build/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mcp",
+    "financial",
+    "banorte",
+    "ia"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@modelcontextprotocol/sdk": "^1.20.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
