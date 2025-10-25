@@ -1,5 +1,6 @@
 // server.js - API REST con Gemini AI para Banorte (ACTUALIZADO con tus JSON)
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: './.env' });
 import express from 'express';
 import cors from 'cors';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -11,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3002;
 
 // Middleware
 app.use(cors());
@@ -19,8 +20,9 @@ app.use(express.json());
 
 // Inicializar Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'TU_API_KEY_AQUI');
-const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-
+const model = genAI.getGenerativeModel({ 
+  model: 'gemini-2.0-flash-exp'
+});
 // Rutas de archivos JSON
 const FINANZAS_PERSONALES = path.join(__dirname, 'data', 'finanzas_personales.json');
 const FINANZAS_EMPRESAS = path.join(__dirname, 'data', 'finanzas_empresas.json');
@@ -159,116 +161,144 @@ app.get('/api/finanzas-empresas/:empresa_id', async (req, res) => {
   }
 });
 
-// POST /api/agregar-transaccion-personal - Agregar transacción personal
-app.post('/api/agregar-transaccion-personal', async (req, res) => {
+// POST /api/transacciones - Agregar nueva transacción
+app.post('/api/transacciones', async (req, res) => {
   try {
-    const { id_usuario, categoria, descripcion, monto, tipo } = req.body;
-    
-    const transacciones = await leerFinanzasPersonales();
+    const datos = await leerDatos();
     const nuevaTransaccion = {
-      id_usuario,
-      fecha: Math.floor(Date.now() / 86400000) + 25569, // Convertir a formato Excel
-      categoria,
-      descripcion,
-      monto: parseFloat(monto),
-      tipo,
+      fecha: req.body.fecha || new Date().toISOString().split('T')[0],
+      monto: parseFloat(req.body.monto),
+      categoria: req.body.categoria,
+      comercio: req.body.comercio || 'No especificado',
     };
     
-    transacciones.push(nuevaTransaccion);
-    await fs.writeFile(FINANZAS_PERSONALES, JSON.stringify(transacciones, null, 2), 'utf-8');
+    datos.transacciones.unshift(nuevaTransaccion);
     
-    res.json({
-      success: true,
-      mensaje: 'Transacción agregada correctamente',
-      transaccion: nuevaTransaccion,
+    if (req.body.actualizarSaldo) {
+      const cuenta = datos.cuentas.find(c => c.id === (req.body.cuentaId || 'CTA001'));
+      if (cuenta) {
+        cuenta.saldo += nuevaTransaccion.monto;
+      }
+    }
+    
+    await guardarDatos(datos);
+    res.json({ 
+      success: true, 
+      mensaje: 'Transacción agregada',
+      transaccion: nuevaTransaccion 
     });
   } catch (error) {
-    res.status(500).json({ error: 'Error al agregar transacción', detalle: error.message });
+    console.error('❌ Error al agregar transacción:', error);
+    res.status(500).json({ 
+      error: 'Error al agregar transacción', 
+      detalle: error.message 
+    });
   }
 });
 
-// POST /api/agregar-transaccion-empresa - Agregar transacción empresarial
-app.post('/api/agregar-transaccion-empresa', async (req, res) => {
+// DELETE /api/transacciones/:indice - Eliminar transacción
+app.delete('/api/transacciones/:indice', async (req, res) => {
   try {
-    const { empresa_id, tipo, concepto, categoria, monto } = req.body;
+    const datos = await leerDatos();
+    const indice = parseInt(req.params.indice);
     
-    const data = await fs.readFile(FINANZAS_EMPRESAS, 'utf-8');
-    const lineas = JSON.parse(data);
-    
-    const nuevaFila = [
-      empresa_id,
-      new Date().toISOString(),
-      tipo,
-      concepto,
-      categoria,
-      parseFloat(monto),
-    ];
-    
-    lineas.push(nuevaFila);
-    await fs.writeFile(FINANZAS_EMPRESAS, JSON.stringify(lineas, null, 2), 'utf-8');
-    
-    res.json({
-      success: true,
-      mensaje: 'Transacción empresarial agregada',
-      transaccion: {
-        empresa_id,
-        fecha: nuevaFila[1],
-        tipo,
-        concepto,
-        categoria,
-        monto: nuevaFila[5],
-      },
-    });
+    if (indice >= 0 && indice < datos.transacciones.length) {
+      const eliminada = datos.transacciones.splice(indice, 1)[0];
+      await guardarDatos(datos);
+      res.json({ 
+        success: true, 
+        mensaje: 'Transacción eliminada',
+        transaccion: eliminada 
+      });
+    } else {
+      res.status(404).json({ error: 'Transacción no encontrada' });
+    }
   } catch (error) {
-    res.status(500).json({ error: 'Error al agregar transacción empresarial', detalle: error.message });
+    res.status(500).json({ error: 'Error al eliminar transacción', detalle: error.message });
   }
 });
 
 // ============= ENDPOINTS CON GEMINI AI =============
 
-// POST /api/consultar-asistente-personal - Consulta con IA para finanzas personales
-app.post('/api/consultar-asistente-personal', async (req, res) => {
+app.post('/api/chat', async (req, res) => {
   try {
-    const { id_usuario, pregunta } = req.body;
+    console.log('📨 Petición recibida en /api/chat');
+    console.log('Body:', req.body);
     
-    if (!id_usuario || !pregunta) {
-      return res.status(400).json({ error: 'Se requiere id_usuario y pregunta' });
+    const { mensaje } = req.body;
+    
+    if (!mensaje) {
+      console.log('⚠️ Mensaje vacío');
+      return res.status(400).json({ error: 'El mensaje es requerido' });
     }
-    
-    const transacciones = await leerFinanzasPersonales();
-    const metricas = calcularMetricasPersonales(transacciones, id_usuario);
-    
-    const prompt = `Eres un asesor financiero personal experto de Banorte México.
 
-SITUACIÓN FINANCIERA DEL USUARIO ${id_usuario}:
-- Ingresos totales: $${metricas.totalIngresos.toLocaleString('es-MX')} MXN
-- Gastos totales: $${metricas.totalGastos.toLocaleString('es-MX')} MXN
-- Balance: $${metricas.balance.toLocaleString('es-MX')} MXN
-- Tasa de ahorro: ${metricas.tasaAhorro}%
+    console.log('📖 Leyendo datos...');
+    const datos = await leerDatos();
+    console.log('✅ Datos leídos');
+    
+    console.log('📊 Calculando métricas...');
+    const metricas = calcularMetricasFinancieras(datos);
+    console.log('✅ Métricas calculadas');
+
+    const promptSistema = `Eres un asistente financiero experto de Banorte México. 
+
+DATOS FINANCIEROS DEL USUARIO:
+- Nombre: ${datos.perfilUsuario.nombre}
+- Ingreso mensual: $${metricas.totalIngresos.toLocaleString('es-MX')} MXN
+- Gastos mensuales: $${metricas.totalGastos.toLocaleString('es-MX')} MXN
+- Saldo total en cuentas: $${metricas.saldoTotal.toLocaleString('es-MX')} MXN
+- Saldo neto mensual: $${metricas.saldoNeto.toLocaleString('es-MX')} MXN
+- Utilización de crédito: ${metricas.utilizacionCredito}%
+- Deuda tarjeta: $${metricas.tarjeta.saldoActual.toLocaleString('es-MX')} MXN
 
 GASTOS POR CATEGORÍA:
 ${Object.entries(metricas.gastosPorCategoria)
-  .sort((a, b) => b[1] - a[1])
   .map(([cat, monto]) => `- ${cat}: $${monto.toLocaleString('es-MX')} MXN`)
   .join('\n')}
 
-PREGUNTA DEL USUARIO:
-${pregunta}
+INSTRUCCIONES:
+1. Responde en español de México
+2. Sé conciso (máximo 250 palabras)
+3. Usa datos reales del usuario
+4. Da recomendaciones accionables
+5. Tono amigable pero profesional
 
-Responde de manera profesional, clara y con recomendaciones accionables basadas en los datos reales. Máximo 300 palabras.`;
+PREGUNTA: ${mensaje}`;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
+    console.log('🤖 Llamando a Gemini...');
+    console.log('🔑 API Key existe:', !!process.env.GEMINI_API_KEY);
     
+    const result = await model.generateContent(promptSistema);
+    console.log('✅ Respuesta de Gemini recibida');
+    
+    const response = await result.response;
+    const respuestaGemini = response.text();
+    console.log('✅ Texto extraído');
+
     res.json({
-      respuesta: response.text(),
-      metricas,
+      respuesta: respuestaGemini,
+      metricas: {
+        saldoTotal: metricas.saldoTotal,
+        utilizacionCredito: metricas.utilizacionCredito,
+        saldoNeto: metricas.saldoNeto,
+      },
       timestamp: new Date().toISOString(),
     });
-    
+
   } catch (error) {
-    console.error('Error en Gemini:', error);
-    res.status(500).json({ error: 'Error al procesar consulta con IA' });
+    console.error('❌ ERROR CRÍTICO EN /api/chat:', error);
+    console.error('❌ Error name:', error.name);
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    
+    // Evitar que el servidor crashee
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'Error al procesar solicitud con Gemini',
+        detalle: error.message,
+        tipo: error.name
+      });
+    }
   }
 });
 
@@ -376,7 +406,7 @@ Responde en JSON:
 });
 
 // POST /api/simular-whatif-personal - Simulador What-If
-app.post('/api/simular-whatif-personal', async (req, res) => {
+('/api/simular-whatif-personal', async (req, res) => {
   try {
     const { 
       id_usuario, 
@@ -470,7 +500,7 @@ app.get('/api/comparar-categorias/:id_usuario', async (req, res) => {
     
     const ranking = Object.entries(metricas.gastosPorCategoria)
       .sort((a, b) => b[1] - a[1])
-      .map(([categoria, monto], index) => ({
+      .maapp.postp(([categoria, monto], index) => ({
         posicion: index + 1,
         categoria,
         monto,
@@ -521,4 +551,15 @@ app.listen(PORT, () => {
   console.log(`   - ${FINANZAS_PERSONALES}`);
   console.log(`   - ${FINANZAS_EMPRESAS}`);
   console.log(` API lista para el hackathon`);
+});
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  console.error('Stack:', error.stack);
+  // NO cerrar el servidor, solo loggear
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection:', reason);
+  console.error('Promise:', promise);
+  // NO cerrar el servidor, solo loggear
 });

@@ -7,21 +7,26 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3001;
 
-// Middleware
-app.use(cors());
+// ⭐ CORS configurado correctamente
+app.use(cors({
+  origin: 'http://localhost:3000',
+  credentials: true
+}));
+
 app.use(express.json());
 
 // Inicializar Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'TU_API_KEY_AQUI');
-const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-
+const model = genAI.getGenerativeModel({ 
+  model: 'gemini-2.0-flash-exp'
+});
+console.log('🔑 API Key cargada:', process.env.GEMINI_API_KEY ? '✅ SÍ' : '❌ NO');
 // Ruta del archivo JSON con datos del usuario
 const DATA_FILE = path.join(__dirname, 'datos-usuario.json');
 
@@ -139,7 +144,7 @@ app.get('/api/datos', async (req, res) => {
   }
 });
 
-// POST /api/datos - Reemplazar todos los datos (cuidado, sobrescribe todo)
+// POST /api/datos - Reemplazar todos los datos
 app.post('/api/datos', async (req, res) => {
   try {
     const nuevosDatos = req.body;
@@ -181,9 +186,8 @@ app.post('/api/transacciones', async (req, res) => {
       comercio: req.body.comercio || 'No especificado',
     };
     
-    datos.transacciones.unshift(nuevaTransaccion); // Agrega al inicio
+    datos.transacciones.unshift(nuevaTransaccion);
     
-    // Actualizar saldo de cuenta si es necesario
     if (req.body.actualizarSaldo) {
       const cuenta = datos.cuentas.find(c => c.id === (req.body.cuentaId || 'CTA001'));
       if (cuenta) {
@@ -197,9 +201,11 @@ app.post('/api/transacciones', async (req, res) => {
       mensaje: 'Transacción agregada',
       transaccion: nuevaTransaccion 
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Error al agregar transacción', detalle: error.message });
-  }
+  }catch (error) {
+  console.error('Error en Gemini:', error);
+  console.error('Error completo:', JSON.stringify(error, null, 2));
+  res.status(500).json({ error: 'Error al procesar solicitud' });
+}
 });
 
 // DELETE /api/transacciones/:indice - Eliminar transacción
@@ -268,12 +274,11 @@ app.put('/api/tarjetas/:id', async (req, res) => {
   }
 });
 
-// POST /api/importar - Importar datos desde JSON (para cargar archivo del usuario)
+// POST /api/importar - Importar datos desde JSON
 app.post('/api/importar', async (req, res) => {
   try {
     const datosImportados = req.body;
     
-    // Validar estructura básica
     if (!datosImportados.cuentas || !datosImportados.transacciones) {
       return res.status(400).json({ 
         error: 'Estructura de datos inválida',
@@ -310,16 +315,25 @@ app.get('/api/exportar', async (req, res) => {
 
 // ============= ENDPOINTS CON GEMINI AI =============
 
-// POST /api/chat - Chat con asistente financiero
 app.post('/api/chat', async (req, res) => {
   try {
+    console.log(' Petición recibida en /api/chat');
+    console.log('Body:', req.body);
+    
     const { mensaje } = req.body;
+    
     if (!mensaje) {
+      console.log(' Mensaje vacío');
       return res.status(400).json({ error: 'El mensaje es requerido' });
     }
 
+    console.log('Leyendo datos...');
     const datos = await leerDatos();
+    console.log(' Datos leídos');
+    
+    console.log(' Calculando métricas...');
     const metricas = calcularMetricasFinancieras(datos);
+    console.log(' Métricas calculadas');
 
     const promptSistema = `Eres un asistente financiero experto de Banorte México. 
 
@@ -346,9 +360,13 @@ INSTRUCCIONES:
 
 PREGUNTA: ${mensaje}`;
 
+    console.log('🤖 Llamando a Gemini...');
     const result = await model.generateContent(promptSistema);
+    console.log('✅ Respuesta de Gemini recibida');
+    
     const response = await result.response;
     const respuestaGemini = response.text();
+    console.log('✅ Texto extraído');
 
     res.json({
       respuesta: respuestaGemini,
@@ -361,8 +379,15 @@ PREGUNTA: ${mensaje}`;
     });
 
   } catch (error) {
-    console.error('Error en Gemini:', error);
-    res.status(500).json({ error: 'Error al procesar solicitud' });
+    console.error('❌ Error en Gemini:', error);
+    console.error('❌ Error name:', error.name);
+    console.error('❌ Error message:', error.message);
+    console.error('❌ Error stack:', error.stack);
+    
+    res.status(500).json({ 
+      error: 'Error al procesar solicitud',
+      detalle: error.message 
+    });
   }
 });
 
@@ -571,10 +596,18 @@ app.get('/', (req, res) => {
     },
   });
 });
-
-app.listen(3001, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${3001}`);
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
   console.log(`🤖 Gemini AI integrado`);
   console.log(`💾 Datos persistentes en: ${DATA_FILE}`);
   console.log(`📊 API lista para el hackathon`);
 });
+process.on('uncaughtException', (error) => {
+  console.error(' Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(' Unhandled Rejection:', reason);
+});
+
+console.log(' Servidor iniciado, esperando peticiones...');
