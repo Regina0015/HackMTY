@@ -321,7 +321,7 @@ app.post('/api/chat', async (req, res) => {
     const datos = await leerDatos();
     const metricas = calcularMetricasFinancieras(datos);
 
-    const promptSistema = `Eres un asistente financiero experto de Banorte México. 
+    const promptSistema = `Actúa como un asistente experto y amigable. Quiero que todas tus respuestas sean en un tono de conversación natural, como si estuvieras charlando conmigo. Por favor, evita estrictamente el uso de listas con viñetas (bullet points) o listas numeradas. En su lugar, explica tus ideas y presenta la información usando párrafos fluidos, oraciones completas y conectores textuales. Quiero que la conversación se sienta humana y natural, no como un documento técnico. Se motivador para el usuario y recuerdale que es posible su meta por mas lejana que parezca.
 
 DATOS FINANCIEROS DEL USUARIO:
 - Nombre: ${datos.perfilUsuario.nombre}
